@@ -1,0 +1,284 @@
+{% extends "base.html" %}
+
+{% block title %}Interactive Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2"><i class="fas fa-tachometer-alt"></i> Interactive Dashboard</h1>
+    <button class="btn btn-primary" onclick="refreshDashboard()">
+        <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+</div>
+
+{% if not error %}
+<!-- Q&A Section -->
+<div class="card mb-4">
+    <div class="card-header">
+        <h5><i class="fas fa-question-circle"></i> Ask Questions About Your Data</h5>
+    </div>
+    <div class="card-body">
+        <div class="row">
+            <div class="col-md-8">
+                <div class="input-group">
+                    <input type="text" class="form-control question-input" id="questionInput" 
+                           placeholder="e.g., What are the top 5 categories by sales? Show me trends over time..."
+                           onkeypress="handleKeyPress(event)">
+                    <button class="btn btn-ask" type="button" onclick="askQuestion()">
+                        <i class="fas fa-paper-plane"></i> Ask
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="dropdown">
+                    <button class="btn btn-outline-secondary dropdown-toggle w-100" type="button" 
+                            data-bs-toggle="dropdown">
+                        <i class="fas fa-lightbulb"></i> Sample Questions
+                    </button>
+                    <ul class="dropdown-menu w-100">
+                        <li><a class="dropdown-item" href="#" onclick="setQuestion('What are the key trends in my data?')">What are the key trends in my data?</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="setQuestion('Show me the top 10 records by value')">Show me the top 10 records by value</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="setQuestion('What are the main insights from this dataset?')">What are the main insights from this dataset?</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="setQuestion('How is the data distributed across categories?')">How is the data distributed across categories?</a></li>
+                        <li><a class="dropdown-item" href="#" onclick="setQuestion('What correlations exist in the data?')">What correlations exist in the data?</a></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Chat History -->
+        <div id="chatHistory" class="chat-container mt-3" style="display: none;">
+            <div id="chatMessages"></div>
+        </div>
+    </div>
+</div>
+
+<!-- KPIs Section -->
+{% if kpis %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h4><i class="fas fa-chart-bar"></i> Key Performance Indicators</h4>
+    </div>
+    {% for kpi in kpis %}
+    <div class="col-md-6 col-lg-3 mb-3">
+        <div class="kpi-card">
+            <div class="kpi-value">
+                {% if kpi.isnum %}
+                    {{ "{:,.0f}".format(kpi.value) if kpi.value == kpi.value|int else "{:,.2f}".format(kpi.value) }}
+                {% else %}
+                    {{ kpi.value }}
+                {% endif %}
+            </div>
+            <div class="kpi-label">{{ kpi.label }}</div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Charts Section -->
+{% if chart_urls %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h4><i class="fas fa-chart-line"></i> Visualizations</h4>
+    </div>
+    {% for chart_url in chart_urls %}
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-body text-center">
+                <img src="{{ chart_url }}" alt="Chart" class="img-fluid" style="max-height: 400px;">
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<!-- Tables Section -->
+{% if tables %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h4><i class="fas fa-table"></i> Data Tables</h4>
+        {% for table in tables %}
+        <div class="card mb-3">
+            <div class="card-body">
+                {{ table|safe }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Dashboard Plan -->
+{% if dashboard_plan_html %}
+<div class="card">
+    <div class="card-header">
+        <h5><i class="fas fa-clipboard-list"></i> Dashboard Analysis</h5>
+    </div>
+    <div class="card-body">
+        {{ dashboard_plan_html|safe }}
+    </div>
+</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+let questionCount = 0;
+
+function handleKeyPress(event) {
+    if (event.key === 'Enter') {
+        askQuestion();
+    }
+}
+
+function setQuestion(question) {
+    document.getElementById('questionInput').value = question;
+}
+
+function askQuestion() {
+    const questionInput = document.getElementById('questionInput');
+    const question = questionInput.value.trim();
+    
+    if (!question) {
+        alert('Please enter a question');
+        return;
+    }
+    
+    // Show chat history if hidden
+    const chatHistory = document.getElementById('chatHistory');
+    chatHistory.style.display = 'block';
+    
+    // Add question to chat
+    addMessageToChat('user', question);
+    
+    // Clear input and show loading
+    questionInput.value = '';
+    addMessageToChat('assistant', '<i class="fas fa-spinner fa-spin"></i> Analyzing your data...', 'loading');
+    
+    // Send question to backend
+    fetch('/ask-question', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({question: question})
+    })
+    .then(response => response.json())
+    .then(data => {
+        // Remove loading message
+        const loadingMessage = document.querySelector('.loading');
+        if (loadingMessage) {
+            loadingMessage.remove();
+        }
+        
+        if (data.error) {
+            addMessageToChat('assistant', 'Sorry, I encountered an error: ' + data.error);
+        } else {
+            // Add answer to chat
+            addMessageToChat('assistant', data.answer_html);
+            
+            // Add any KPIs
+            if (data.kpis && data.kpis.length > 0) {
+                let kpiHtml = '<div class="row mt-3">';
+                data.kpis.forEach(kpi => {
+                    const value = kpi.isnum ? 
+                        (kpi.value === parseInt(kpi.value) ? parseInt(kpi.value).toLocaleString() : parseFloat(kpi.value).toLocaleString()) : 
+                        kpi.value;
+                    kpiHtml += `
+                        <div class="col-md-6 mb-2">
+                            <div class="card bg-light">
+                                <div class="card-body text-center p-2">
+                                    <h6 class="card-title mb-1">${kpi.label}</h6>
+                                    <h5 class="text-primary mb-0">${value}</h5>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                kpiHtml += '</div>';
+                addMessageToChat('assistant', kpiHtml);
+            }
+            
+            // Add any charts
+            if (data.chart_urls && data.chart_urls.length > 0) {
+                let chartHtml = '<div class="mt-3">';
+                data.chart_urls.forEach(url => {
+                    chartHtml += `
+                        <div class="text-center mb-3">
+                            <img src="${url}" alt="Generated Chart" class="img-fluid" style="max-height: 400px; border-radius: 8px;">
+                        </div>
+                    `;
+                });
+                chartHtml += '</div>';
+                addMessageToChat('assistant', chartHtml);
+            }
+        }
+        
+        // Scroll to bottom
+        scrollChatToBottom();
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        const loadingMessage = document.querySelector('.loading');
+        if (loadingMessage) {
+            loadingMessage.remove();
+        }
+        addMessageToChat('assistant', 'Sorry, I encountered an error while processing your question.');
+        scrollChatToBottom();
+    });
+}
+
+function addMessageToChat(sender, message, className = '') {
+    questionCount++;
+    const chatMessages = document.getElementById('chatMessages');
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `mb-3 ${className}`;
+    
+    if (sender === 'user') {
+        messageDiv.innerHTML = `
+            <div class="d-flex justify-content-end">
+                <div class="card bg-primary text-white" style="max-width: 70%;">
+                    <div class="card-body p-2">
+                        <strong>You:</strong> ${message}
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        messageDiv.innerHTML = `
+            <div class="d-flex justify-content-start">
+                <div class="card border-left-primary" style="max-width: 85%; border-left: 4px solid #007bff;">
+                    <div class="card-body p-3">
+                        <div class="d-flex align-items-center mb-2">
+                            <i class="fas fa-robot text-primary me-2"></i>
+                            <strong>AI Assistant:</strong>
+                        </div>
+                        <div>${message}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    chatMessages.appendChild(messageDiv);
+    scrollChatToBottom();
+}
+
+function scrollChatToBottom() {
+    const chatHistory = document.getElementById('chatHistory');
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+}
+
+function refreshDashboard() {
+    location.reload();
+}
+
+// Auto-focus on question input
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('questionInput').focus();
+});
+</script>
+{% endblock %}
